@@ -1,0 +1,339 @@
+---
+title: "Final Project"
+output: pdf_document
+date: "10/18/2026"
+filename: Final_Project.rmd
+---
+
+```{r setup, include=FALSE}
+# install_github('jokergoo/ComplexHeatmap')
+# library(devtools)
+library(tidyverse) #library(tibble) is included
+library(gridExtra)
+library(ggplot2)
+library(ggpubr)
+library(ComplexHeatmap)
+library(circlize)
+library(ggridges)
+library(knitr)
+library(kableExtra)
+library(ggExtra)
+library(grid)
+dir.create("figures", showWarnings = FALSE)
+dir.create("tables", showWarnings = FALSE)
+```
+
+1) Data Preparation and Gene Selection:
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                              DATA PREPARATION
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Set the path to the folder containing the data files
+file_path <- "/Users/patriciapetrova/Dartmouth/HSE711/FinalProject/"
+
+# Read in the RNA-seq count data using read.csv()
+# Setting check.names = FALSE keeps the original TCGA barcodes with hyphens 
+# instead of converting them to dots.
+rna_df <- read.csv(paste0(file_path,"counts.csv"), 
+                   row.names = 1, 
+                   check.names = FALSE)
+
+# Read in the metadata using read.csv()
+meta_df <- read.csv(paste0(file_path,"meta_data.csv"), 
+                    check.names = FALSE, na.strings = c("", "NA"))
+
+# Create a gene key for gene/ID mapping
+# Gene names and Ensembl IDs were checked against human gene records
+# https://www.genenames.org/
+gene_key <- data.frame(
+  Gene = c("GATA3", "FOXA1", "FUCA2", "KRIT1", "RAD52",
+           "RPAP3", "MSL3", "AGA", "TNPO3", "GCN1"),
+  Ensembl_ID = c("ENSG00000107485.18", "ENSG00000129514.8",
+                 "ENSG00000001036.14", "ENSG00000001631.16",
+                 "ENSG00000002016.18", "ENSG00000005175.10",
+                 "ENSG00000005302.19", "ENSG00000038002.9",
+                 "ENSG00000064419.13", "ENSG00000089154.11")
+)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                              SELECT GENES
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GATA3
+gata3_id <- gene_key$Ensembl_ID[gene_key$Gene == "GATA3"]
+
+# FOXA1
+foxa1_id <- gene_key$Ensembl_ID[gene_key$Gene == "FOXA1"]
+
+# Display the selected genes ID
+gata3_id
+foxa1_id
+
+# Create the data frame for selected genes
+gene_df <- data.frame(
+  barcode = colnames(rna_df),
+  GATA3 = as.numeric(rna_df[gata3_id, ]),
+  FOXA1 = as.numeric(rna_df[foxa1_id, ])
+)
+
+# Combine counts and metadata for the summaries and plots
+analysis_df <- gene_df %>%
+  left_join(meta_df, by = "barcode")
+
+# Check if the barcodes in the analysis_df match the barcodes in the rna_df columns
+stopifnot(nrow(analysis_df) == ncol(rna_df),
+          identical(analysis_df$barcode, colnames(rna_df)))
+
+# Create log-transformed GATA3 and FOXA1 variables
+analysis_df <- analysis_df %>%
+  mutate(log2_GATA3 = log2(GATA3 + 1),
+         log2_FOXA1 = log2(FOXA1 + 1),
+         PAM50 = factor(paper_BRCA_Subtype_PAM50, 
+                        levels = c("Basal", "Her2", "LumA", "LumB", "Normal")),
+         Stage = factor(gsub("_", " ", paper_pathologic_stage),
+                        levels = c("Stage I", "Stage II", "Stage III", "Stage IV")))
+
+# Create the PAM50 subset dataframe to use in visualizations including PAM50 subtypes
+pam50_df <- analysis_df %>% filter(!is.na(PAM50))
+
+# Reuse the same palette and display label in every visualization
+pam50_colors <- c("Basal"  = "#E41A1C",
+                  "Her2"   = "#E78AC3",
+                  "LumA"   = "#377EB8",
+                  "LumB"   = "#4DAF4A",
+                  "Normal" = "#8D7F72")
+
+pam50_display <- c("Basal" = "Basal-like", 
+                   "Her2" = "HER2-enriched",
+                   "LumA" = "Luminal A", 
+                   "LumB" = "Luminal B",
+                   "Normal" = "Normal-like")
+
+stage_colors <- c("Stage I" = "#fee5d9", 
+                  "Stage II" = "#fcae91",
+                  "Stage III" = "#fb6a4a", 
+                  "Stage IV" = "#cb181d")
+
+# Prepare long data for the faceted ridgeline plot
+ridge_df <- pam50_df %>%
+  select(barcode, PAM50, GATA3, FOXA1) %>%
+  pivot_longer(cols = c(GATA3, FOXA1), names_to = "Gene", values_to = "Count") %>%
+  mutate(log2_count = log2(Count + 1),
+         Gene = factor(Gene, levels = c("GATA3", "FOXA1")))
+
+# Prepare the heatmap matrix and annotations 
+meta_heatmap <- pam50_df
+heatmap_counts <- as.matrix(rna_df[gene_key$Ensembl_ID,
+                                   meta_heatmap$barcode, drop = FALSE])
+stopifnot(identical(colnames(heatmap_counts), meta_heatmap$barcode))
+
+# Log2-transform the raw counts
+# Adding 1 prevents issues when a count is equal to 0
+heatmap_log <- log2(heatmap_counts + 1)
+
+# Convert each gene to z-scores across samples
+heatmap_z <- t(scale(t(heatmap_log)))
+
+# Greate gene labels
+gene_labels <- gene_key$Gene[match(rownames(heatmap_z), gene_key$Ensembl_ID)]
+
+# Create the heatmap annotation 
+sample_annotation <- HeatmapAnnotation(
+  PAM50 = meta_heatmap$PAM50,
+  Stage = meta_heatmap$Stage,
+  col = list(PAM50 = pam50_colors, Stage = stage_colors),
+  na_col = "grey80"
+)
+
+# Correlations use exactly the same 1,099 profiles as BOTH scatter plots
+r_raw <- cor(pam50_df$GATA3, pam50_df$FOXA1)
+r_log2 <- cor(pam50_df$log2_GATA3, pam50_df$log2_FOXA1)
+```
+
+2) Summary Statistics:
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                              SUMMARY STATISTICS
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Calculate summary statistics
+summary_stats <- gene_df %>%
+  select(GATA3, FOXA1) %>%
+  pivot_longer(everything(), names_to = "Gene", values_to = "Count") %>%
+  group_by(Gene) %>%
+  summarize(Mean = mean(Count), SD = sd(Count), Median = median(Count),
+            Q1 = quantile(Count, 0.25, names = FALSE),
+            Q3 = quantile(Count, 0.75, names = FALSE),
+            Minimum = min(Count), Maximum = max(Count), .groups = "drop") %>%
+  mutate(Gene = factor(Gene, levels = c("GATA3", "FOXA1"))) %>%
+  arrange(Gene)
+
+gene_table <- kable(summary_stats, format = "latex", booktabs = TRUE, row.names = FALSE,
+                     caption = "Summary Statistics for GATA3 and FOXA1 Raw Cunts") %>% 
+  kable_styling(latex_options = c("hold_position"))
+gene_table
+
+write.csv(summary_stats, "tables/gene_summary.csv", row.names = FALSE)
+```
+
+3) Visualization:
+a) Histogram:
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                                  HISTOGRAM
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Statistics for the vertical lines
+m_mean <- summary_stats[["Mean"]][1]
+m_median <- summary_stats[["Median"]][1] 
+
+# Create the histogram
+p_hist <- ggplot(analysis_df, aes(x = GATA3)) +
+  geom_histogram(bins = 30, color = "#2c3e50", fill = "darkblue", alpha = 0.7) + 
+  # Vertical line for the mean
+  geom_vline(aes(xintercept = m_mean, color = "Mean"), 
+             linetype = "solid", linewidth = 1, key_glyph = "path") +
+  # Vertical line for the median
+  geom_vline(aes(xintercept = m_median, color = "Median"), 
+             linetype = "dashed", linewidth = 1, key_glyph = "path") +
+  scale_color_manual(values = c("Mean" = "#D3624D", "Median" = "#D4AF37")) +
+  labs(x = "Raw RNA-seq Counts", y = "Number of Samples", color = NULL,
+       title = expression(paste(bold("Distribution of "), 
+                                bolditalic("GATA3"), 
+                                bold(" Expression")))) +
+  theme_classic() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title = element_text(face = "bold"),
+        legend.position = "top",
+        legend.key.width = unit(1.2, "cm"))
+p_hist
+
+ggsave("figures/figure1_histogram.pdf", p_hist, width = 8, height = 4.8)
+```
+
+b) Scatter Plot:
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                              SCATTER PLOT
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+p_raw <- ggplot(pam50_df, aes(x = GATA3, y = FOXA1, color = PAM50)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_smooth(aes(group = 1), method = "lm", se = FALSE,
+              color = "black", linewidth = 0.7) +
+  scale_color_manual(values = pam50_colors, labels = pam50_display) +
+  labs(title = "Raw counts", 
+        x = expression(italic("GATA3")),
+        y = expression(italic("FOXA1")), color = "PAM50 Subtype") +
+  # parse = TRUE tells ggplot2 to treat the label text as a plotmath expression 
+  # instead of printing it literally.
+  # without parse = TRUE, the r is shown exactly as text: italic(r) == 0.761
+  annotate("text", x = Inf, y = -Inf,
+           label = paste0("italic(r) == ", round(r_raw, 3)),
+           parse = TRUE, hjust = 1.1, vjust = -1, size = 3.5) +
+  theme_classic() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+p_log <- ggplot(pam50_df, aes(x = log2_GATA3, y = log2_FOXA1, color = PAM50)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_smooth(aes(group = 1), method = "lm", se = FALSE,
+              color = "black", linewidth = 0.7) +
+  scale_color_manual(values = pam50_colors, labels = pam50_display) +
+  labs(title = "Log2-transformed counts",
+       x = expression(log[2]~"("*italic("GATA3")~" + 1)"),
+       y = expression(log[2]~"("*italic("FOXA1")~" + 1)"),
+       color = "PAM50 Subtype") +
+  annotate("text", x = Inf, y = -Inf,
+           label = paste0("italic(r) == ", round(r_log2, 3)),
+           parse = TRUE, hjust = 1.1, vjust = -1, size = 3.5) +
+  theme_classic() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+scatter_panel <- ggarrange(p_raw, p_log, ncol = 2, nrow = 1, common.legend = TRUE, 
+                           legend = "bottom", align = "hv")
+
+# https://stackoverflow.com/questions/65694397/add-main-title-multiple-plots-ggarange
+scatter_panel <- annotate_figure(
+  scatter_panel, top = text_grob(expression(paste(bolditalic("GATA3"), bold(" vs. "), 
+                                                  bolditalic("FOXA1"))), size = 14))
+scatter_panel
+ggsave("figures/figure2_scatter_comparison.pdf", scatter_panel,
+       width = 11, height = 4.8)
+```
+
+c) Violin Plot:
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                              VIOLIN PLOT
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Calculate the number of samples in each PAM 50 subtype
+pam50_n <- table(pam50_df$PAM50)
+
+violin_p <- ggplot(pam50_df, aes(x = PAM50, y = log2_GATA3, fill = PAM50)) +
+  geom_violin(scale = "width", alpha = 0.8, color = "black", linewidth = 0.5) +
+  geom_boxplot(width = 0.1, fill = "white", alpha = 0.8, 
+               outlier.color = "gray25", outlier.size = 0.8) +
+  scale_fill_manual(values = pam50_colors) +
+  scale_x_discrete(labels = function(x) {
+    paste0(pam50_display[x], "\n(n = ", pam50_n[x], ")")
+  }) +
+  labs(title = expression(paste(bolditalic("GATA3"), bold(" Distribution by PAM50 Subtype"))),
+       x = "PAM50 subtype",
+       y = expression(log[2]~"("*italic("GATA3")~" + 1)")) +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title = element_text(face = "bold"),
+        plot.title = element_text(hjust = 0.5))
+violin_p
+
+ggsave("figures/figure3_violinplot.pdf", violin_p, width = 9, height = 5)
+```
+
+d) Heatmap: 
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                                  HEATMAP
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+heatmap_p <- Heatmap(heatmap_z, 
+                     name = "Z-score", 
+                     row_labels = gene_labels,
+                     top_annotation = sample_annotation,
+                     show_row_names = TRUE, 
+                     show_column_names = FALSE,
+                     column_title = "Samples", 
+                     row_title = "Selected genes", 
+                     row_names_gp = gpar(fontface = "italic", fontsize = 10),
+                     column_split = meta_heatmap$PAM50,
+                     cluster_column_slices = FALSE,
+                     cluster_rows = TRUE, 
+                     cluster_columns = TRUE)
+draw(heatmap_p)
+pdf("figures/figure4_heatmap.pdf", width = 10, height = 5.8)
+draw(heatmap_p)
+dev.off()
+```
+e) Additional plot: Ridgeline Plot
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                              RIDGELINE PLOT
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+p_ridge <- ggplot(ridge_df, aes(x = log2_count, y = PAM50, fill = PAM50)) +
+  geom_density_ridges(alpha = 0.8, scale = 1.05, color = "black", linewidth = 0.45) +
+  scale_fill_manual(values = pam50_colors) +
+  scale_y_discrete(labels = pam50_display) +
+  facet_wrap(~ Gene, nrow = 1) +
+  labs(title = "Expression Distributions by PAM50 Subtype",
+       x = expression(log[2]~"(Count + 1)"), y = "PAM50 subtype") +
+  theme_classic() +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold", hjust = 0.5, margin = margin(b = 10)),
+        strip.text.x = element_text(face = "bold.italic"),
+        strip.background = element_rect(fill = "gray95", color = "black"),
+        panel.spacing.x = grid::unit(0.35, "cm"))
+p_ridge
+
+ggsave("figures/figure5_ridgelines.pdf", p_ridge, width = 9, height = 5.2)
+```
