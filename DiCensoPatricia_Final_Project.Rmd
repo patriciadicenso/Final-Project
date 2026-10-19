@@ -23,9 +23,13 @@ dir.create("figures", showWarnings = FALSE)
 dir.create("tables", showWarnings = FALSE)
 ```
 
+Final Project Steps: 
+
 1) Data Preparation and Gene Selection:
 
 ```{r}
+# TCGA-BRCA gene expression visualization project
+# Updated code documentation
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #                              DATA PREPARATION
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
