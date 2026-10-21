@@ -342,6 +342,7 @@ p_ridge
 ggsave("figures/figure5_ridgelines.pdf", p_ridge, width = 9, height = 5.2)
 ```
 
+
 ## *Note:*
 
 I searched for solutions on Google and used its AI Overview and chat to explore my options further. The AI Overview directed me to specific links, and I verified everything I looked up against reliable sources.
