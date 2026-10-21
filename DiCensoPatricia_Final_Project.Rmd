@@ -341,3 +341,20 @@ p_ridge
 
 ggsave("figures/figure5_ridgelines.pdf", p_ridge, width = 9, height = 5.2)
 ```
+
+## *Note:*
+
+I searched for solutions on Google and used its AI Overview and chat to explore my options further. The AI Overview directed me to specific links, and I verified everything I looked up against reliable sources.
+
+* I searched for a way to position the table closer to where it appears in the code when knitting to PDF and found the `hold_position()` function.
+    - [***Kable styling***](https://www.rdocumentation.org/packages/kableExtra/versions/1.4.1/topics/kable_styling)
+* In my histogram, I needed to create space for the **Median**” and “**Mean** labels at the top of the plot. I was advised to use `legend.key.width = unit()` within the `theme()` function. This required loading the **grid** library to recognize the `unit()` function. 
+    - [***Ggplot2 styling***](https://www.cedricscherer.com/2019/08/05/a-ggplot2-tutorial-for-beautiful-plotting-in-r/)
+* I also looked into displaying special symbols in ggplot2, such as the calculated correlation coefficient in the plot. 
+    - [***Special symbols in ggplot2***](https://steffilazerte.ca/posts/ggplot-symbols/)
+* I searched for how to add special characters or custom labels, specifically for the x and y axes when displaying log2-transformed variables. The solution was to use the expression() function.  
+    - [***Log2-transformation***](https://www.nathalievialaneix.eu/doc/html/TP2_interaction.html)
+* I also searched for how to save a heat map created with the ComplexHeatmap package as a PDF, which led me to Stack Overflow. I learned that I need to save my heatmap as a new variable and then use the draw() function to create a plot in the PDF. 
+    - [***Saving a heatmap***](https://stackoverflow.com/questions/66044888/how-to-save-a-heat-map-created-using-the-complexheatmap-package-to-png-format)
+* I also refreshed my memory on how to display multiple plots with a common x-axis and add a supertitle in addition to the main titles on individual plots. This led me to learn more about the facet_wrap() function, which I used in my ridgeline plot. 
+    - [***Facetting in ggplot2***](https://ggplot2-book.org/facet.html)
