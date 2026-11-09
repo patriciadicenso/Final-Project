@@ -173,7 +173,7 @@ summary_stats <- gene_df %>%
   arrange(Gene)
 
 gene_table <- kable(summary_stats, format = "latex", booktabs = TRUE, row.names = FALSE,
-                     caption = "Summary Statistics for GATA3 and FOXA1 Raw Cunts") %>% 
+                     caption = "Summary Statistics for GATA3 and FOXA1 Raw Counts") %>% 
   kable_styling(latex_options = c("hold_position"))
 gene_table
 
